@@ -8,6 +8,7 @@
 	xmlns:twitter="tag:conaltuohy.com,2015:twitter"
 	xmlns:digitalnz="tag:conaltuohy.com,2015:digitalnz"
 	xmlns:paperspast="tag:conaltuohy.com,2015:paperspast"
+	xmlns:utility="tag:conaltuohy.com,2015:utility"
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
 	xmlns:html="http://www.w3.org/1999/xhtml">
 	
@@ -28,9 +29,12 @@
 		<p:variable name="headline" select="/html:html/html:head/html:meta[@name='newsarticle_headline']/@content">
 			<p:pipe step="centenary" port="result"/>
 		</p:variable>
+		<p:variable name="url-purged-headline" select="
+			replace($headline, '\.', '.&#8203;')
+		"/>
 		<p:variable name="citation" select="
 			concat(
-				' - ',
+				' — ',
 				/html:html/html:head/html:meta[@name='newsarticle_publication']/@content,
 				' #100years '
 			)
@@ -40,10 +44,11 @@
 		<p:variable name="uri" select="/html:html/@xml:base">
 			<p:pipe step="centenary" port="result"/>
 		</p:variable>
+		<!-- 22 is length of shortened http URI -->
 		<p:variable name="status" select="
 			concat(
 				substring(
-					$headline, 1, 140 - string-length($citation) - 21
+					$url-purged-headline, 1, 140 - string-length($citation) - 46
 				),
 				$citation,
 				$uri
@@ -266,7 +271,6 @@
 		</p:xslt>
 		<twitter:sign-request/>
 		<p:http-request/>
-		<!---->
 	</p:declare-step>
 	
 	<p:declare-step type="twitter:www-form-urldecode">
@@ -324,7 +328,8 @@
 				string(
 					xs:integer(fn:seconds-from-duration($duration-since-unix-epoch)) +
 					fn:minutes-from-duration($duration-since-unix-epoch) * 60 +
-					fn:hours-from-duration($duration-since-unix-epoch) * 60 * 60 + fn:days-from-duration($duration-since-unix-epoch) * 24 * 60 * 60
+					fn:hours-from-duration($duration-since-unix-epoch) * 60 * 60 + 
+					fn:days-from-duration($duration-since-unix-epoch) * 24 * 60 * 60
 				)
 			"/>
 			<p:variable name="oauth_token" select="$access-token"/>
@@ -345,13 +350,13 @@
 				</p:input>
 			</p:delete>
 			<!-- Read the URL parameters into a parameter set -->
-			<twitter:www-form-urldecode name="url-parameters">
+			<utility:www-form-urldecode name="url-parameters">
 				<p:with-option name="value" select="$url-parameter-string"/>
-			</twitter:www-form-urldecode>
+			</utility:www-form-urldecode>
 			<!-- Read the POST parameters into a parameter set -->
-			<twitter:www-form-urldecode name="post-parameters">
+			<utility:www-form-urldecode name="post-parameters">
 				<p:with-option name="value" select="$post-parameter-string"/>	
-			</twitter:www-form-urldecode>
+			</utility:www-form-urldecode>
 			<!-- merge the OAuth, POST, and URL parameters into a single set -->
 			<p:wrap-sequence wrapper="c:param-set">
 				<p:input port="source" select="/c:param-set/c:param">
@@ -459,9 +464,189 @@
 							<p:pipe step="authorization-header" port="result"/>
 						</p:input>
 					</p:insert>
+					<p:add-attribute match="/*" attribute-name="twitter:parameter-string">
+						<p:with-option name="attribute-value" select="$parameter-string"/>
+					</p:add-attribute>
 				</p:group>
 			</p:group>
 		</p:group>
 	</p:declare-step>
+
+	<p:declare-step type="utility:www-form-urldecode">
+		<p:option name="value" required="true"/>
+		<p:output port="result"/>
+		<p:xslt>
+			<p:with-param name="value" select="$value"/>
+			<p:input port="source">
+				<p:inline>
+					<c:param-set/>
+				</p:inline>
+			</p:input>
+			<p:input port="stylesheet">
+				<p:inline>
+					<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:c="http://www.w3.org/ns/xproc-step" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+						<xsl:param name="value"/>
+						<xsl:template match="/c:param-set">
+							<xsl:copy>
+								<xsl:call-template name="urldecode">
+									<xsl:with-param name="urlencoded" select="$value"/>
+								</xsl:call-template>
+							</xsl:copy>
+						</xsl:template>
+						<xsl:template name="urldecode">
+							<xsl:param name="urlencoded"/>
+							<xsl:if test="$urlencoded">
+								<xsl:analyze-string select="translate($urlencoded, '+', ' ')" regex="([^&amp;]+)">
+									<xsl:matching-substring>
+										<xsl:variable name="name">
+											<xsl:call-template name="decode">
+												<xsl:with-param name="text" select="substring-before(., '=')"/>
+											</xsl:call-template>
+										</xsl:variable>
+										<xsl:variable name="value">
+											<xsl:call-template name="decode">
+												<xsl:with-param name="text" select="substring-after(., '=')"/>
+											</xsl:call-template>
+										</xsl:variable>
+										<c:param name="{$name}" value="{$value}"/>
+									</xsl:matching-substring>
+								</xsl:analyze-string>
+							</xsl:if>
+						</xsl:template>
+						<xsl:template name="decode">
+							<xsl:param name="text"/>
+							<!-- unescape and decode UTF-8 -->
+							<!-- http://en.wikipedia.org/wiki/UTF-8#Description -->
+							<xsl:variable name="ascii" select="substring-before(concat($text, '%'), '%')"/>
+							<xsl:value-of select="$ascii"/>
+							<xsl:variable name="encoded" select="substring-after($text, $ascii)"/>
+							<xsl:if test="$encoded">
+								<xsl:variable name="hex-digit-1">
+									<xsl:call-template name="get-hex-value">
+										<xsl:with-param name="hex-digit" select="substring($encoded, 2, 1)"/>
+									</xsl:call-template>
+								</xsl:variable>
+								<xsl:variable name="hex-digit-2">
+									<xsl:call-template name="get-hex-value">
+										<xsl:with-param name="hex-digit" select="substring($encoded, 3, 1)"/>
+									</xsl:call-template>
+								</xsl:variable>
+								<xsl:choose>
+									<!-- 1 byte character (=ASCII) -->
+									<xsl:when test="$hex-digit-1 &lt; 12">
+										<xsl:value-of select="codepoints-to-string(xs:integer($hex-digit-1 * 16 + $hex-digit-2))"/>
+										<xsl:call-template name="decode">
+											<xsl:with-param name="text" select="substring($encoded, 4)"/>
+										</xsl:call-template>
+									</xsl:when>
+									<xsl:otherwise>
+										<!-- more than a single byte character -->
+										<xsl:variable name="hex-digit-3">
+											<xsl:call-template name="get-hex-value">
+												<xsl:with-param name="hex-digit" select="substring($encoded, 5, 1)"/>
+											</xsl:call-template>
+										</xsl:variable>
+										<xsl:variable name="hex-digit-4">
+											<xsl:call-template name="get-hex-value">
+												<xsl:with-param name="hex-digit" select="substring($encoded, 6, 1)"/>
+											</xsl:call-template>
+										</xsl:variable>
+										<xsl:choose>
+											<!-- binary 1100xxxx  ⇒ 2 byte character -->
+											<xsl:when test="$hex-digit-1 = 12 or $hex-digit-1 = 13 ">
+												<!-- UTF-8-decode -->
+												<xsl:variable name="code-point" select="
+													xs:integer(
+														($hex-digit-1 - 12) * 1024 + 
+														$hex-digit-2 * 64 + 
+														($hex-digit-3 - 8) * 16 +
+														($hex-digit-4)
+													)
+												"/>
+												<xsl:value-of select="codepoints-to-string($code-point)"/>
+												<xsl:call-template name="decode">
+													<xsl:with-param name="text" select="substring($encoded, 7)"/>
+												</xsl:call-template>
+											</xsl:when>
+											<xsl:otherwise>
+												<!-- 3 or 4 byte character -->
+												<xsl:variable name="hex-digit-5">
+													<xsl:call-template name="get-hex-value">
+														<xsl:with-param name="hex-digit" select="substring($encoded, 8, 1)"/>
+													</xsl:call-template>
+												</xsl:variable>
+												<xsl:variable name="hex-digit-6">
+													<xsl:call-template name="get-hex-value">
+														<xsl:with-param name="hex-digit" select="substring($encoded, 9, 1)"/>
+													</xsl:call-template>
+												</xsl:variable>
+												<xsl:choose>
+													<!-- binary 1110xxxx ⇒ 3 byte character -->
+													<xsl:when test="$hex-digit-1 = 14 ">
+														<!-- UTF-8-decode -->
+														<!-- 1110 xxxx 	10xx xxxx 	10xx xxxx -->
+														<xsl:variable name="code-point" select="
+															xs:integer(
+																$hex-digit-2 * 4096 +
+																($hex-digit-3 - 8) * 1024 +
+																$hex-digit-4 * 64 + 
+																($hex-digit-5 - 8) * 16 +
+																($hex-digit-6)
+															)
+														"/>
+														<xsl:value-of select="codepoints-to-string($code-point)"/>
+														<xsl:call-template name="decode">
+															<xsl:with-param name="text" select="substring($encoded, 10)"/>
+														</xsl:call-template>
+													</xsl:when>
+													<xsl:when test="$hex-digit-1 =15 "><!-- 1111xxxx  ⇒ 4 byte character -->
+														<xsl:variable name="hex-digit-7">
+															<xsl:call-template name="get-hex-value">
+																<xsl:with-param name="hex-digit" select="substring($encoded, 11, 1)"/>
+															</xsl:call-template>
+														</xsl:variable>
+														<xsl:variable name="hex-digit-8">
+															<xsl:call-template name="get-hex-value">
+																<xsl:with-param name="hex-digit" select="substring($encoded, 12, 1)"/>
+															</xsl:call-template>
+														</xsl:variable>
+														<!-- UTF-8-decode -->
+														<!-- 1111	0xxx 	10xx	xxxx 	10xx	xxxx 	10xx	xxxx -->
+														<xsl:variable name="code-point" select="
+															xs:integer(
+																$hex-digit-2 * 262144 +
+																($hex-digit-3 - 8) * 65536 +
+																$hex-digit-4 * 4096 + 
+																($hex-digit-5 - 8) * 1024 +
+																$hex-digit-6 * 64 + 
+																($hex-digit-7 - 8) * 16 +
+																($hex-digit-8)
+															)
+														"/>
+														<xsl:value-of select="codepoints-to-string($code-point)"/>
+														<xsl:call-template name="decode">
+															<xsl:with-param name="text" select="substring($encoded, 13)"/>
+														</xsl:call-template>
+													</xsl:when>
+												</xsl:choose>
+											</xsl:otherwise>
+										</xsl:choose>
+									</xsl:otherwise>
+								</xsl:choose>
+							</xsl:if>
+						</xsl:template>
+						<xsl:template name="get-hex-value">
+							<xsl:param name="hex-digit"/>
+							<xsl:variable name="values" select="'0123456789ABCDEF'"/>
+							<xsl:value-of select="string-length(substring-before($values, $hex-digit))"/>
+						</xsl:template>
+					</xsl:stylesheet>
+				</p:inline>
+			</p:input>
+			<p:input port="parameters">
+				<p:empty/>
+			</p:input>
+		</p:xslt>
+	</p:declare-step>	
 	
 </p:declare-step>
