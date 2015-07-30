@@ -44,11 +44,19 @@
 		<p:variable name="uri" select="/html:html/@xml:base">
 			<p:pipe step="centenary" port="result"/>
 		</p:variable>
-		<!-- 22 is length of shortened http URI -->
+		<!-- compute maximum length deducting space for 2 URIs and the citation from the max tweet length -->
+		<p:variable name="max-headline-length" select="140 - string-length($citation) - 46"/>
+		<p:variable name="headline-needs-truncation" select="number($max-headline-length &lt; string-length($url-purged-headline))"/>
+		<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the newspaper name and URI -->
 		<p:variable name="status" select="
 			concat(
 				substring(
-					$url-purged-headline, 1, 140 - string-length($citation) - 46
+					$url-purged-headline, 1, $max-headline-length - $headline-needs-truncation
+				),
+				substring(
+					'…',
+					1,
+					$headline-needs-truncation
 				),
 				$citation,
 				$uri
