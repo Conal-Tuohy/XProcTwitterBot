@@ -45,7 +45,7 @@
 			<p:pipe step="centenary" port="result"/>
 		</p:variable>
 		<!-- compute maximum length deducting space for 2 URIs and the citation from the max tweet length -->
-		<p:variable name="max-headline-length" select="140 - string-length($citation) - 46"/>
+		<p:variable name="max-headline-length" select="140 - string-length($citation) - 48"/>
 		<p:variable name="headline-needs-truncation" select="number($max-headline-length &lt; string-length($url-purged-headline))"/>
 		<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the newspaper name and URI -->
 		<p:variable name="status" select="
