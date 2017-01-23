@@ -12,60 +12,81 @@
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
 	xmlns:html="http://www.w3.org/1999/xhtml">
 	
+	
 	<p:input port="parameters" kind="parameter"/>
 	<p:output port="result"/>
 	
 	<!-- get a page containing an illustration from 100 years ago -->
-	<paperspast:on-this-day name="centenary" content-type="illustration" years-ago="100"/>
+	<p:template>
+		<p:input port="source"><p:empty/></p:input>
+		<p:input port="template">
+			<p:inline>
+				<query>
+					<text></text>
+					<per_page>100</per_page><!-- maximum=100, default=20 -->
+					<and>
+						<date>{
+							substring(
+								string(
+									current-date() - xs:yearMonthDuration('P100Y')
+								),
+								1, 10
+							)
+						}</date>
+						<category>Images</category>
+						<content_partner>National Library of New Zealand</content_partner>
+						<primary_collection>Papers Past</primary_collection>
+					</and>
+				</query>
+			</p:inline>
+		</p:input>
+	</p:template>
+	<digitalnz:search/>
+	<p:filter name="illustration" select="/search/results/result[1]"/>
 	<!-- download the first image from that page -->
 	<paperspast:get-image>
-		<p:with-option name="href" select="(//html:img[@class='veridianimage'])[1]/@src"/>
+		<p:with-option name="href" select="/result/object-url"/>
 	</paperspast:get-image>
 	<!-- upload it to Twitter -->
 	<twitter:upload-media/>
 	<!-- construct a tweet that references the image uploaded to Twitter -->
 	<p:group>
 		<p:variable name="media-id" select="substring-after(substring-before(/c:body, ','), ':')"/>
-		<p:variable name="headline" select="/html:html/html:head/html:meta[@name='newsarticle_headline']/@content">
-			<p:pipe step="centenary" port="result"/>
-		</p:variable>
-		<p:variable name="url-purged-headline" select="
-			replace($headline, '\.', '.&#8203;')
-		"/>
-		<p:variable name="citation" select="
-			concat(
-				' — ',
-				/html:html/html:head/html:meta[@name='newsarticle_publication']/@content,
-				' #100years '
-			)
-		">
-			<p:pipe step="centenary" port="result"/>
-		</p:variable>
-		<p:variable name="uri" select="/html:html/@xml:base">
-			<p:pipe step="centenary" port="result"/>
-		</p:variable>
-		<!-- compute maximum length deducting space for 2 URIs and the citation from the max tweet length -->
-		<p:variable name="max-headline-length" select="140 - string-length($citation) - 48"/>
-		<p:variable name="headline-needs-truncation" select="number($max-headline-length &lt; string-length($url-purged-headline))"/>
-		<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the newspaper name and URI -->
-		<p:variable name="status" select="
-			concat(
-				substring(
-					$url-purged-headline, 1, $max-headline-length - $headline-needs-truncation
-				),
-				substring(
-					'…',
-					1,
-					$headline-needs-truncation
-				),
-				$citation,
-				$uri
-			)
-		"/>
-		<twitter:tweet>
-			<p:with-option name="status" select="$status"/>
-			<p:with-option name="media-ids" select="$media-id"/>
-		</twitter:tweet>
+		<p:identity>
+			<p:input port="source">
+				<p:pipe step="illustration" port="result"/>
+			</p:input>
+		</p:identity>
+		<p:group>
+			<!-- insert a zero-width space after every . in the headline, to defeat Twitter's URL recognition -->
+			<p:variable name="headline" select="
+				replace(/result/title, '\.', '.&#8203;')
+			"/>
+			<!-- compute maximum length of headline the max tweet length -->
+			<p:variable name="max-headline-length" select="140 - string-length($headline) - 35"/>
+			<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the newspaper name and URI -->
+			<p:variable name="status" select="
+				concat(
+					(
+						if (string-length($headline) &gt; $max-headline-length) then concat(
+							substring(
+								$headline, 
+								1, 
+								$max-headline-length - 1
+							),
+							'…'
+						)
+						else $headline
+					),
+					' #100years ',
+					/result/landing-url
+				)
+			"/>
+			<twitter:tweet>
+				<p:with-option name="status" select="$status"/>
+				<p:with-option name="media-ids" select="$media-id"/>
+			</twitter:tweet>
+		</p:group>
 	</p:group>
 	
 	<p:declare-step type="twitter:upload-media">
@@ -114,61 +135,7 @@
 
 	
 	
-	<p:declare-step type="paperspast:on-this-day">
-		<p:option name="text" select=" '' "/>
-		<p:option name="years-ago" select=" '100' "/>
-		<p:option name="content-type" select=" '' "/><!-- "" (all) | "ARTICLE" | "ADVERTISEMENT" | "ILLUSTRATION" -->
-		<p:option name="match" select=" '1' " /><!-- 2='exact phrase' | 1='any' | 0='all' -->
-		<p:output port="result"/>
-		<p:variable name="date" select="
-			substring(
-				string(
-					current-date() - xs:yearMonthDuration(
-						concat('P', $years-ago, 'Y')
-					)
-				),
-				1, 10
-			)
-		"/>
-		<p:variable name="search-uri" select="
-			concat(
-				'http://paperspast.natlib.govt.nz/cgi-bin/paperspast?e=',
-				'&amp;a=q',
-				'&amp;hs=1',
-				'&amp;r=1',
-				'&amp;results=1',
-				'&amp;t=', $match,
-				'&amp;txq=', $text,
-				'&amp;x=0',
-				'&amp;y=0',
-				'&amp;pbq=',
-				'&amp;dafdq=', substring($date, 9, 2),
-				'&amp;dafmq=', substring($date, 6, 2),
-				'&amp;dafyq=', substring($date, 1, 4),
-				'&amp;datdq=', substring($date, 9, 2),
-				'&amp;datmq=', substring($date, 6, 2),
-				'&amp;datyq=',  substring($date, 1, 4),
-				'&amp;tyq=', fn:upper-case($content-type),
-				'&amp;o=10',
-				'&amp;sf=',
-				'&amp;ssnip='
-			)
-		"/>
-		<!-- execute search -->
-		<paperspast:load-as-xml>
-			<p:with-option name="href" select="$search-uri"/>
-		</paperspast:load-as-xml>
-		<!-- pick the first search result and request that page -->
-		<paperspast:load-as-xml>
-			<p:with-option name="href" select="
-				concat(
-					'http://paperspast.natlib.govt.nz',
-					(//html:div[@class='search-results']/html:p/html:a[not(string(.)='Untitled')])[1]/@href
-				)
-			"/>
-		</paperspast:load-as-xml>
-		<p:make-absolute-uris match="@src | @href"/>
-	</p:declare-step>
+
 	
 			<!-- code to trim all except "a" and "d" URI parameters from a paperspast article page, which we should because
 			we might want to tweet this URL--><!--
@@ -192,25 +159,6 @@
 			</p:group>
 		</p:group>
 -->
-	
-	<p:declare-step type="paperspast:load-as-xml">
-		<!-- used to parse XHTML served as "text/html" -->
-		<p:option name="href" required="true"/>
-		<p:output port="result"/>
-		<p:identity>
-			<p:input port="source">
-				<p:inline>
-					<c:request method="GET" override-content-type="application/xml"/>
-				</p:inline>
-			</p:input>
-		</p:identity>
-		<p:add-attribute match="/c:request" attribute-name="href">
-			<p:with-option name="attribute-value" select="$href"/>
-		</p:add-attribute>
-		<p:http-request/>
-		<p:add-xml-base/>
-	</p:declare-step>
-	
 	
 
 	<p:declare-step type="twitter:followers">
@@ -479,5 +427,75 @@
 			</p:group>
 		</p:group>
 	</p:declare-step>	
+	<p:declare-step type="digitalnz:search" name="search">
+		<!-- digital NZ API key is passed as a parameter called "digitalnz-api-key" -->
+		<p:input port="parameters" kind="parameter"/>
+		<p:input port="source"/>
+		<!-- source document is a query in XML format expressing the query language described here: http://www.digitalnz.org/developers/api-docs-v3/search-records-api-v3
+		
+		The root element must be <query>.
+		The <query> element may have child elements <and> <or> and <without> which are logical operators grouping facet restrictions.
+		The child elements of those operators are the names of facets (e.g. <content_partner>); their text contents are the values of those facets.
+		Other child elements of <query> are other the query parameters, i.e. <text>, <page>, <per_page>, <facets>, <facets_page>, <facets_per_page>, <sort>, <direction>, and <geo_bbox>
+		-->
+		<p:output port="result">
+			<p:pipe step="digitalnz-response" port="result"/>
+		</p:output>
+		<p:xslt name="digitalnz-request">
+			<p:input port="stylesheet">
+				<p:inline>
+					<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"
+						xmlns:c="http://www.w3.org/ns/xproc-step">
+						<xsl:param name="digitalnz-api-key"/>
+						<xsl:template match="/query">
+							<c:request method="GET">
+								<xsl:attribute name="href">
+									<xsl:text>http://api.digitalnz.org/v3/records.xml?api_key=</xsl:text>
+									<xsl:value-of select="$digitalnz-api-key"/>
+									<xsl:apply-templates select="*"/>
+								</xsl:attribute>
+							</c:request>
+						</xsl:template>
+						<xsl:template match="/query/*[*]">
+							<xsl:apply-templates select="*"/>
+						</xsl:template>
+						<xsl:template match="/query/*/*">
+							<xsl:value-of select="concat(
+								'&amp;',
+								local-name(..),
+								'[',
+								local-name(.),
+								']=',
+								encode-for-uri(.)
+							)"/>
+						</xsl:template>
+						<xsl:template match="/query/*[not(*)]">
+							<xsl:value-of select="concat(
+								'&amp;',
+								local-name(.),
+								'=',
+								encode-for-uri(.)
+							)"/>
+						</xsl:template>
+					</xsl:stylesheet>
+				</p:inline>
+			</p:input>
+		</p:xslt>
+		<!-- invoke query -->
+		<p:http-request name="digitalnz-response"/>
+		<!-- 
+		debugging output
+		<p:store href="tmp-response.xml">
+			<p:input port="source">
+				<p:pipe step="digitalnz-response" port="result"/>
+			</p:input>
+		</p:store>
+		<p:store href="tmp-request.xml">
+			<p:input port="source">
+				<p:pipe step="digitalnz-request" port="result"/>
+			</p:input>
+		</p:store>
+		-->
+	</p:declare-step>
 	
 </p:declare-step>
