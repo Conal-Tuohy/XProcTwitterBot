@@ -12,82 +12,115 @@
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
 	xmlns:html="http://www.w3.org/1999/xhtml">
 	
-	
 	<p:input port="parameters" kind="parameter"/>
-	<p:output port="result"/>
 	
-	<!-- get a page containing an illustration from 100 years ago -->
-	<p:template>
-		<p:input port="source"><p:empty/></p:input>
-		<p:input port="template">
-			<p:inline>
-				<query>
-					<text></text>
-					<per_page>100</per_page><!-- maximum=100, default=20 -->
-					<and>
-						<date>{
-							substring(
-								string(
-									current-date() - xs:yearMonthDuration('P100Y')
-								),
-								1, 10
+	<digitalnz:tweet-anniversary-illustration name="one-hundred-and-twenty-five" years-ago="125"/>
+	<digitalnz:tweet-anniversary-illustration name="one-hundred" years-ago="100"/>
+	<digitalnz:tweet-anniversary-illustration name="seventy-five" years-ago="75"/>
+	
+	<p:declare-step type="digitalnz:get-anniversary-illustration" name="get-anniversary-illustration">
+		<p:option name="years-ago" required="true"/>
+		<p:input port="parameters" kind="parameter"/>
+		<p:output port="result" sequence="true"/>
+		<!-- get a page from n years ago containing an illustration -->
+		<p:template>
+			<p:with-param name="date" select="
+				substring(
+					string(
+						current-date() - xs:yearMonthDuration(
+							concat(
+								'P', 
+								$years-ago, 
+								'Y'
 							)
-						}</date>
-						<category>Images</category>
-						<content_partner>National Library of New Zealand</content_partner>
-						<primary_collection>Papers Past</primary_collection>
-					</and>
-				</query>
-			</p:inline>
-		</p:input>
-	</p:template>
-	<digitalnz:search/>
-	<p:filter name="illustration" select="/search/results/result[1]"/>
-	<!-- download the first image from that page -->
-	<paperspast:get-image>
-		<p:with-option name="href" select="/result/object-url"/>
-	</paperspast:get-image>
-	<!-- upload it to Twitter -->
-	<twitter:upload-media/>
-	<!-- construct a tweet that references the image uploaded to Twitter -->
-	<p:group>
-		<p:variable name="media-id" select="substring-after(substring-before(/c:body, ','), ':')"/>
-		<p:identity>
-			<p:input port="source">
-				<p:pipe step="illustration" port="result"/>
-			</p:input>
-		</p:identity>
-		<p:group>
-			<!-- insert a zero-width space after every . in the headline, to defeat Twitter's URL recognition -->
-			<p:variable name="headline" select="
-				replace(/result/title, '\.', '.&#8203;')
-			"/>
-			<!-- compute maximum length of headline the max tweet length -->
-			<p:variable name="max-headline-length" select="140 - string-length($headline) - 35"/>
-			<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the newspaper name and URI -->
-			<p:variable name="status" select="
-				concat(
-					(
-						if (string-length($headline) &gt; $max-headline-length) then concat(
-							substring(
-								$headline, 
-								1, 
-								$max-headline-length - 1
-							),
-							'…'
 						)
-						else $headline
-					),
-					' #100years ',
-					/result/landing-url
+					), 
+					1, 
+					10
 				)
 			"/>
-			<twitter:tweet>
-				<p:with-option name="status" select="$status"/>
-				<p:with-option name="media-ids" select="$media-id"/>
-			</twitter:tweet>
-		</p:group>
-	</p:group>
+			<p:input port="source"><p:empty/></p:input>
+			<p:input port="template">
+				<p:inline>
+					<query>
+						<text></text>
+						<per_page>100</per_page><!-- maximum=100, default=20 -->
+						<and>
+							<date>{$date}</date>
+							<category>Images</category>
+							<content_partner>National Library of New Zealand</content_partner>
+							<primary_collection>Papers Past</primary_collection>
+						</and>
+					</query>
+				</p:inline>
+			</p:input>
+		</p:template>
+		<digitalnz:search name="search-results"/>
+		<p:filter name="illustration" select="/search/results/result[last()]"/>
+	</p:declare-step>
+
+	<p:declare-step type="digitalnz:tweet-anniversary-illustration" name="tweet-illustrations">
+		<p:option name="years-ago" required="true"/>
+		<p:input port="parameters" kind="parameter"/>
+		<digitalnz:get-anniversary-illustration>
+			<p:with-option name="years-ago" select="$years-ago"/>
+		</digitalnz:get-anniversary-illustration>
+		<p:for-each name="illustration">
+			<!-- download the image -->
+			<paperspast:get-image>
+				<p:with-option name="href" select="/result/object-url"/>
+			</paperspast:get-image>
+			<!-- upload it to Twitter -->
+			<twitter:upload-media/>
+			<!-- construct a tweet that references the image uploaded to Twitter -->
+			<p:group>
+				<p:variable name="media-id" select="substring-after(substring-before(/c:body, ','), ':')"/>
+				<p:identity>
+					<p:input port="source">
+						<p:pipe step="illustration" port="current"/>
+					</p:input>
+				</p:identity>
+				<p:group>
+					<!-- Strip leading "Untitled Illustration", and insert a zero-width space after every "." 
+					in the headline, to defeat Twitter's URL recognition -->
+					<p:variable name="headline" select="
+						replace(
+							replace(
+								/result/title, 
+								'^Untitled Illustration ', ''
+							), 
+							'\.', '.&#8203;'
+						)
+					"/>
+					<!-- compute maximum length of headline the max tweet length -->
+					<p:variable name="max-headline-length" select="140 - string-length($headline) - 35"/>
+					<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the page URI -->
+					<p:variable name="status" select="
+						concat(
+							(
+								if (string-length($headline) &gt; $max-headline-length) then concat(
+									substring(
+										$headline, 
+										1, 
+										$max-headline-length - 1
+									),
+									'…'
+								)
+								else $headline
+							),
+							' #', $years-ago, 'years ',
+							/result/landing-url
+						)
+					"/>
+					<twitter:tweet>
+						<p:with-option name="status" select="$status"/>
+						<p:with-option name="media-ids" select="$media-id"/>
+					</twitter:tweet>
+					<p:sink/>
+				</p:group>
+			</p:group>
+		</p:for-each>
+	</p:declare-step>
 	
 	<p:declare-step type="twitter:upload-media">
 		<p:input port="parameters" kind="parameter"/>
