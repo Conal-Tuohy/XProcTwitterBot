@@ -109,7 +109,7 @@
 								else $headline
 							),
 							' #', $years-ago, 'years ',
-							/result/landing-url
+							/result/source-url
 						)
 					"/>
 					<twitter:tweet>
