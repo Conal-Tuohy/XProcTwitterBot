@@ -11,6 +11,7 @@
 	xmlns:utility="tag:conaltuohy.com,2015:utility"
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
 	xmlns:html="http://www.w3.org/1999/xhtml">
+	<p:import href="http://xmlcalabash.com/extension/steps/library-1.0.xpl"/>
 	
 	<p:input port="parameters" kind="parameter"/>
 	
@@ -62,64 +63,72 @@
 	<p:declare-step type="digitalnz:tweet-anniversary-illustration" name="tweet-illustrations">
 		<p:option name="years-ago" required="true"/>
 		<p:input port="parameters" kind="parameter"/>
-		<digitalnz:get-anniversary-illustration>
-			<p:with-option name="years-ago" select="$years-ago"/>
-		</digitalnz:get-anniversary-illustration>
-		<p:for-each name="illustration">
-			<!-- download the image -->
-			<paperspast:get-image>
-				<p:with-option name="href" select="/result/object-url"/>
-			</paperspast:get-image>
-			<!-- upload it to Twitter -->
-			<twitter:upload-media/>
-			<!-- construct a tweet that references the image uploaded to Twitter -->
-			<p:group>
-				<p:variable name="media-id" select="substring-after(substring-before(/c:body, ','), ':')"/>
-				<p:identity>
-					<p:input port="source">
-						<p:pipe step="illustration" port="current"/>
-					</p:input>
-				</p:identity>
+		<twitter:get-configuration/>
+		<p:group>
+			<p:variable 
+				name="max-url-length" 
+				xmlns:j="http://marklogic.com/json" 
+				select="number(/c:body/j:json/j:short_005furl_005flength_005fhttps)"/>
+			<digitalnz:get-anniversary-illustration>
+				<p:with-option name="years-ago" select="$years-ago"/>
+			</digitalnz:get-anniversary-illustration>
+			<p:for-each name="illustration">
+				<!-- download the image -->
+				<paperspast:get-image>
+					<p:with-option name="href" select="/result/object-url"/>
+				</paperspast:get-image>
+				<!-- upload it to Twitter -->
+				<twitter:upload-media/>
+				<!-- construct a tweet that references the image uploaded to Twitter -->
 				<p:group>
-					<!-- Strip leading "Untitled Illustration", and insert a zero-width space after every "." 
-					in the headline, to defeat Twitter's URL recognition -->
-					<p:variable name="headline" select="
-						replace(
+					<p:variable name="media-id" select="substring-after(substring-before(/c:body, ','), ':')"/>
+					<p:identity>
+						<p:input port="source">
+							<p:pipe step="illustration" port="current"/>
+						</p:input>
+					</p:identity>
+					<p:group>
+						<!-- Strip leading "Untitled Illustration", and insert a zero-width space after every "." 
+						in the headline, to defeat Twitter's URL recognition -->
+						<p:variable name="hashtag" select="concat(' #', $years-ago, 'years ')"/>
+						<p:variable name="headline" select="
 							replace(
-								/result/title, 
-								'^Untitled Illustration ', ''
-							), 
-							'\.', '.&#8203;'
-						)
-					"/>
-					<!-- compute maximum length of headline the max tweet length -->
-					<p:variable name="max-headline-length" select="140 - string-length($headline) - 35"/>
-					<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the page URI -->
-					<p:variable name="status" select="
-						concat(
-							(
-								if (string-length($headline) &gt; $max-headline-length) then concat(
-									substring(
-										$headline, 
-										1, 
-										$max-headline-length - 1
-									),
-									'…'
-								)
-								else $headline
-							),
-							' #', $years-ago, 'years ',
-							/result/source-url
-						)
-					"/>
-					<twitter:tweet>
-						<p:with-option name="status" select="$status"/>
-						<p:with-option name="media-ids" select="$media-id"/>
-					</twitter:tweet>
-					<p:sink/>
+								replace(
+									/result/title, 
+									'^Untitled Illustration ', ''
+								), 
+								'\.', '.&#8203;'
+							)
+						"/>
+						<!-- compute maximum length of headline the max tweet length -->
+						<p:variable name="max-headline-length" select="140 - string-length($hashtag) - $max-url-length"/>
+						<!-- status text is the headline, truncated if necessary, and if so, with an ellipsis, followed by the page URI -->
+						<p:variable name="status" select="
+							concat(
+								(
+									if (string-length($headline) &gt; $max-headline-length) then concat(
+										substring(
+											$headline, 
+											1, 
+											$max-headline-length - 1
+										),
+										'…'
+									)
+									else $headline
+								),
+								$hashtag,
+								/result/source-url
+							)
+						"/>
+						<twitter:tweet>
+							<p:with-option name="status" select="$status"/>
+							<p:with-option name="media-ids" select="$media-id"/>
+						</twitter:tweet>
+						<p:sink/>
+					</p:group>
 				</p:group>
-			</p:group>
-		</p:for-each>
+			</p:for-each>
+		</p:group>
 	</p:declare-step>
 	
 	<p:declare-step type="twitter:upload-media">
@@ -209,6 +218,24 @@
 		</p:identity>	
 		<twitter:sign-request/>
 		<p:http-request/>
+	</p:declare-step>
+	
+	<p:declare-step type="twitter:get-configuration">
+		<p:input port="parameters" kind="parameter"/>
+		<p:output port="result"/>
+		<p:identity name="config-request">
+			<p:input port="source">
+				<p:inline>
+					<c:request 
+						method="GET" 
+						href="https://api.twitter.com/1.1/help/configuration.json">
+					</c:request>
+				</p:inline>
+			</p:input>
+		</p:identity>	
+		<twitter:sign-request/>
+		<p:http-request/>
+		<p:unescape-markup content-type="application/json" encoding="base64" charset="UTF-8"/>
 	</p:declare-step>
 	
 	<p:declare-step type="twitter:tweet">
