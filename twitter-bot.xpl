@@ -10,14 +10,28 @@
 	xmlns:paperspast="tag:conaltuohy.com,2015:paperspast"
 	xmlns:utility="tag:conaltuohy.com,2015:utility"
 	xmlns:xs="http://www.w3.org/2001/XMLSchema"
+	xmlns:j="http://marklogic.com/json" 
 	xmlns:html="http://www.w3.org/1999/xhtml">
 	<p:import href="http://xmlcalabash.com/extension/steps/library-1.0.xpl"/>
 	
 	<p:input port="parameters" kind="parameter"/>
-	
+
 	<digitalnz:tweet-anniversary-illustration name="one-hundred-and-twenty-five" years-ago="125"/>
 	<digitalnz:tweet-anniversary-illustration name="one-hundred" years-ago="100"/>
 	<digitalnz:tweet-anniversary-illustration name="seventy-five" years-ago="75"/>
+	
+	<p:declare-step type="utility:dump" name="dump">
+		<p:input port="source" sequence="true"/>
+		<p:output port="result" sequence="true">
+			<p:pipe step="dump" port="source"/>
+		</p:output>
+		<p:option name="href"/>
+		<p:for-each>
+			<p:store>
+				<p:with-option name="href" select="$href"/>
+			</p:store>
+		</p:for-each>
+	</p:declare-step>
 	
 	<p:declare-step type="digitalnz:get-anniversary-illustration" name="get-anniversary-illustration">
 		<p:option name="years-ago" required="true"/>
@@ -67,15 +81,19 @@
 		<p:group>
 			<p:variable 
 				name="max-url-length" 
-				xmlns:j="http://marklogic.com/json" 
 				select="number(/c:body/j:json/j:short_005furl_005flength_005fhttps)"/>
+				<!--
+			<cx:message>
+				<p:with-option name="message" select="concat('max-url-length: ', $max-url-length)"/>
+			</cx:message>
+			-->
 			<digitalnz:get-anniversary-illustration>
 				<p:with-option name="years-ago" select="$years-ago"/>
 			</digitalnz:get-anniversary-illustration>
 			<p:for-each name="illustration">
 				<!-- download the image -->
 				<paperspast:get-image>
-					<p:with-option name="href" select="/result/object-url"/>
+					<p:with-option name="href" select="/result/landing-url"/>
 				</paperspast:get-image>
 				<!-- upload it to Twitter -->
 				<twitter:upload-media/>
@@ -161,6 +179,7 @@
 	<p:declare-step type="paperspast:get-image">
 		<p:input port="source"/>
 		<p:output port="result"/>
+		<!-- href specifies the "landing page" of the image -->
 		<p:option name="href" required="true"/>
 		<p:identity>
 			<p:input port="source">
@@ -173,6 +192,22 @@
 			<p:with-option name="attribute-value" select="$href"/>
 		</p:add-attribute>
 		<p:http-request/>
+		<p:unescape-markup content-type="text/html"/>
+		<!-- now find the url of the image, within this landing page, and use it to download the image -->
+		<p:group>
+			<p:variable name="image-url" select="concat('https://paperspast.natlib.govt.nz', (//html:img[@alt='Article image'])[1]/@src)"/>
+			<p:identity>
+				<p:input port="source">
+					<p:inline>
+						<c:request method="GET"/>
+					</p:inline>
+				</p:input>
+			</p:identity>
+			<p:add-attribute match="/c:request" attribute-name="href">
+				<p:with-option name="attribute-value" select="$image-url"/>
+			</p:add-attribute>
+			<p:http-request/>
+		</p:group>
 	</p:declare-step>
 
 	
